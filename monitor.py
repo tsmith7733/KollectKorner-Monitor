@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Kollect Korner One Piece TCG preorder monitor.
+Kollect Korner TCG preorder monitor.
 
-Checks the store's Shopify JSON product feed, finds products matching
-One Piece + (Booster Box | Booster Pack Display), and posts a Discord
-webhook notification only when such a product is IN STOCK — either
-because it's newly listed and already available, or because a
-previously out-of-stock/sold-out listing just became available
+Checks the store's Shopify JSON product feed, finds products matching:
+  - One Piece: Booster Box | Booster Pack Display
+  - Pokemon: Elite Trainer Box | Booster Box | Booster Display | Booster Bundle
+and posts a Discord webhook notification only when such a product is IN
+STOCK — either because it's newly listed and already available, or because
+a previously out-of-stock/sold-out listing just became available
 (a restock/allocation drop).
 
 State (last known availability per product) is persisted to a JSON file
@@ -31,8 +32,20 @@ FEED_URLS = [
 STATE_FILE = os.path.join(os.path.dirname(__file__), "seen_products.json")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
-KEYWORDS_REQUIRED_ALL = ["one piece"]
-KEYWORDS_REQUIRED_ANY = ["booster box", "booster pack display", "booster display"]
+KEYWORD_RULES = [
+    {
+        "franchise": ["one piece"],
+        "product_type": ["booster box", "booster pack display", "booster display"],
+    },
+    {
+        "franchise": ["pokemon", "pokémon"],
+        "product_type": [
+            "elite trainer box", "etb",
+            "booster box", "booster pack display", "booster display",
+            "booster bundle",
+        ],
+    },
+]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; PreorderWatcher/1.0; +https://github.com/)"
@@ -84,13 +97,14 @@ def matches_keywords(product):
         product.get("title", ""),
         product.get("product_type", ""),
         " ".join(product.get("tags", [])) if isinstance(product.get("tags"), list) else str(product.get("tags", "")),
-    ]).lower()
+    ]).lower().replace("é", "e")  # normalize accented Pokémon -> pokemon
 
-    if not all(k in haystack for k in KEYWORDS_REQUIRED_ALL):
-        return False
-    if not any(k in haystack for k in KEYWORDS_REQUIRED_ANY):
-        return False
-    return True
+    for rule in KEYWORD_RULES:
+        franchise_ok = any(k in haystack for k in rule["franchise"])
+        type_ok = any(k in haystack for k in rule["product_type"])
+        if franchise_ok and type_ok:
+            return True
+    return False
 
 
 def is_in_stock(product):
@@ -141,7 +155,7 @@ def notify_discord(product, is_restock):
     headline = "Back in stock" if is_restock else "New preorder — in stock now"
 
     embed = {
-        "title": f"🏴‍☠️ {headline}: {title}",
+        "title": f"🎴 {headline}: {title}",
         "url": url,
         "description": f"Price: ${price}" if price else None,
         "color": 0xE3120B,
@@ -150,7 +164,7 @@ def notify_discord(product, is_restock):
         embed["thumbnail"] = {"url": image}
 
     payload = {
-        "content": "One Piece TCG booster box/display is available for preorder!",
+        "content": "A tracked TCG preorder is available now!",
         "embeds": [embed],
     }
 
